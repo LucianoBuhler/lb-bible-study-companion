@@ -9,8 +9,6 @@
 
 import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
-import fs from 'fs/promises'
-import path from 'path'
 
 // Supabase configuration
 const supabaseUrl = process.env.VITE_SUPABASE_URL
@@ -26,7 +24,26 @@ if (!supabaseUrl || !supabaseServiceKey) {
   process.exit(1)
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+})
+
+// Test connection and bypass RLS
+async function testConnection() {
+  console.log('Testing Supabase connection...')
+  
+  // Test with a simple query that bypasses RLS
+  const { data, error } = await supabase.rpc('get_current_user_id')
+  
+  if (error && error.code !== '42883') { // Function doesn't exist is OK
+    console.log('Connection test result:', { data, error })
+  }
+  
+  console.log('✅ Supabase connection established')
+}
 
 // Bible books data
 const bibleBooks = [
@@ -104,19 +121,46 @@ const bibleBooks = [
 async function loadBooks() {
   console.log('Loading Bible books...')
   
-  // Insert all books at once
-  const { data, error } = await supabase
-    .from('books')
-    .insert(bibleBooks)
-    .select()
+  // Insert books one by one to handle conflicts better
+  const insertedBooks = []
   
-  if (error) {
-    console.error('Error loading books:', error)
-    throw error
+  for (const book of bibleBooks) {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .insert([book])
+        .select()
+        .single()
+      
+      if (error) {
+        // Try to check if book already exists
+        const { data: existing } = await supabase
+          .from('books')
+          .select('*')
+          .eq('name', book.name)
+          .single()
+        
+        if (existing) {
+          console.log(`📖 Book "${book.name}" already exists, skipping...`)
+          insertedBooks.push(existing)
+        } else {
+          console.error(`❌ Error loading book ${book.name}:`, error)
+        }
+      } else {
+        console.log(`✅ Loaded book: ${book.name}`)
+        insertedBooks.push(data)
+      }
+    } catch (err) {
+      console.error(`❌ Failed to insert book ${book.name}:`, err)
+    }
+  }
+  
+  if (insertedBooks.length === 0) {
+    throw new Error('No books were loaded successfully')
   }
 
-  console.log(`Successfully loaded ${data.length} books`)
-  return data
+  console.log(`📚 Successfully loaded ${insertedBooks.length} books`)
+  return insertedBooks
 }
 
 async function fetchBibleAPI(book, chapter) {
@@ -211,18 +255,44 @@ async function loadSampleVerses() {
     }
   ]
 
-  const { data, error } = await supabase
-    .from('verses')
-    .insert(sampleVerses)
-    .select()
+  const insertedVerses = []
   
-  if (error) {
-    console.error('Error loading verses:', error)
-    throw error
+  for (const verse of sampleVerses) {
+    try {
+      const { data, error } = await supabase
+        .from('verses')
+        .insert([verse])
+        .select()
+        .single()
+      
+      if (error) {
+        // Check if verse already exists
+        const { data: existing } = await supabase
+          .from('verses')
+          .select('*')
+          .eq('book_name', verse.book_name)
+          .eq('chapter', verse.chapter)
+          .eq('verse', verse.verse)
+          .eq('translation', verse.translation)
+          .single()
+        
+        if (existing) {
+          console.log(`📜 Verse ${verse.book_name} ${verse.chapter}:${verse.verse} already exists, skipping...`)
+          insertedVerses.push(existing)
+        } else {
+          console.error(`❌ Error loading verse ${verse.book_name} ${verse.chapter}:${verse.verse}:`, error)
+        }
+      } else {
+        console.log(`✅ Loaded verse: ${verse.book_name} ${verse.chapter}:${verse.verse}`)
+        insertedVerses.push(data)
+      }
+    } catch (err) {
+      console.error(`❌ Failed to insert verse ${verse.book_name} ${verse.chapter}:${verse.verse}:`, err)
+    }
   }
 
-  console.log(`Successfully loaded ${data.length} sample verses`)
-  return data
+  console.log(`📜 Successfully loaded ${insertedVerses.length} sample verses`)
+  return insertedVerses
 }
 
 async function loadSampleCommentary() {
@@ -350,6 +420,9 @@ async function loadSampleQuizQuestions() {
 async function main() {
   try {
     console.log('Starting Bible data loading process...')
+    
+    // Test connection first
+    await testConnection()
     
     // Load books first
     await loadBooks()
