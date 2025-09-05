@@ -104,18 +104,35 @@ const bibleBooks = [
 async function loadBooks() {
   console.log('Loading Bible books...')
   
-  const { data, error } = await supabase
-    .from('books')
-    .upsert(bibleBooks, { onConflict: 'name' })
-    .select()
-
-  if (error) {
-    console.error('Error loading books:', error)
-    throw error
+  // Insert books one by one to handle conflicts better
+  const insertedBooks = []
+  
+  for (const book of bibleBooks) {
+    const { data, error } = await supabase
+      .from('books')
+      .upsert([book], { onConflict: 'name' })
+      .select()
+    
+    if (error) {
+      console.error(`Error loading book ${book.name}:`, error)
+      // Try a simple insert instead
+      const { data: insertData, error: insertError } = await supabase
+        .from('books')
+        .insert([book])
+        .select()
+      
+      if (insertError && !insertError.message.includes('duplicate')) {
+        console.error(`Failed to insert book ${book.name}:`, insertError)
+      } else if (insertData) {
+        insertedBooks.push(...insertData)
+      }
+    } else if (data) {
+      insertedBooks.push(...data)
+    }
   }
 
-  console.log(`Successfully loaded ${data.length} books`)
-  return data
+  console.log(`Successfully loaded ${insertedBooks.length} books`)
+  return insertedBooks
 }
 
 async function fetchBibleAPI(book, chapter) {
@@ -210,18 +227,24 @@ async function loadSampleVerses() {
     }
   ]
 
-  const { data, error } = await supabase
-    .from('verses')
-    .upsert(sampleVerses, { onConflict: 'book_name,chapter,verse,translation' })
-    .select()
-
-  if (error) {
-    console.error('Error loading verses:', error)
-    throw error
+  // Insert verses one by one to handle conflicts better
+  const insertedVerses = []
+  
+  for (const verse of sampleVerses) {
+    const { data, error } = await supabase
+      .from('verses')
+      .insert([verse])
+      .select()
+    
+    if (error && !error.message.includes('duplicate')) {
+      console.error(`Error loading verse ${verse.book_name} ${verse.chapter}:${verse.verse}:`, error)
+    } else if (data) {
+      insertedVerses.push(...data)
+    }
   }
 
-  console.log(`Successfully loaded ${data.length} sample verses`)
-  return data
+  console.log(`Successfully loaded ${insertedVerses.length} sample verses`)
+  return insertedVerses
 }
 
 async function loadSampleCommentary() {
