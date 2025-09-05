@@ -7,6 +7,7 @@
  * It uses the Bible API or local JSON data to populate the verses table.
  */
 
+import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
 import fs from 'fs/promises'
 import path from 'path'
@@ -16,7 +17,12 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('Missing Supabase configuration. Please check your environment variables.')
+  console.error('Missing Supabase configuration. Please check your .env file contains:')
+  console.error('VITE_SUPABASE_URL=your_supabase_url')
+  console.error('SUPABASE_SERVICE_ROLE_KEY=your_service_role_key')
+  console.error('\nCurrent values:')
+  console.error('VITE_SUPABASE_URL:', supabaseUrl ? 'Set' : 'Missing')
+  console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? 'Set' : 'Missing')
   process.exit(1)
 }
 
