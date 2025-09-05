@@ -104,35 +104,19 @@ const bibleBooks = [
 async function loadBooks() {
   console.log('Loading Bible books...')
   
-  // Insert books one by one to handle conflicts better
-  const insertedBooks = []
+  // Insert all books at once
+  const { data, error } = await supabase
+    .from('books')
+    .insert(bibleBooks)
+    .select()
   
-  for (const book of bibleBooks) {
-    const { data, error } = await supabase
-      .from('books')
-      .upsert([book], { onConflict: 'name' })
-      .select()
-    
-    if (error) {
-      console.error(`Error loading book ${book.name}:`, error)
-      // Try a simple insert instead
-      const { data: insertData, error: insertError } = await supabase
-        .from('books')
-        .insert([book])
-        .select()
-      
-      if (insertError && !insertError.message.includes('duplicate')) {
-        console.error(`Failed to insert book ${book.name}:`, insertError)
-      } else if (insertData) {
-        insertedBooks.push(...insertData)
-      }
-    } else if (data) {
-      insertedBooks.push(...data)
-    }
+  if (error) {
+    console.error('Error loading books:', error)
+    throw error
   }
 
-  console.log(`Successfully loaded ${insertedBooks.length} books`)
-  return insertedBooks
+  console.log(`Successfully loaded ${data.length} books`)
+  return data
 }
 
 async function fetchBibleAPI(book, chapter) {
@@ -227,24 +211,18 @@ async function loadSampleVerses() {
     }
   ]
 
-  // Insert verses one by one to handle conflicts better
-  const insertedVerses = []
+  const { data, error } = await supabase
+    .from('verses')
+    .insert(sampleVerses)
+    .select()
   
-  for (const verse of sampleVerses) {
-    const { data, error } = await supabase
-      .from('verses')
-      .insert([verse])
-      .select()
-    
-    if (error && !error.message.includes('duplicate')) {
-      console.error(`Error loading verse ${verse.book_name} ${verse.chapter}:${verse.verse}:`, error)
-    } else if (data) {
-      insertedVerses.push(...data)
-    }
+  if (error) {
+    console.error('Error loading verses:', error)
+    throw error
   }
 
-  console.log(`Successfully loaded ${insertedVerses.length} sample verses`)
-  return insertedVerses
+  console.log(`Successfully loaded ${data.length} sample verses`)
+  return data
 }
 
 async function loadSampleCommentary() {
@@ -292,7 +270,7 @@ async function loadSampleCommentary() {
 
   const { data, error } = await supabase
     .from('commentaries')
-    .upsert(sampleCommentary)
+    .insert(sampleCommentary)
     .select()
 
   if (error) {
@@ -357,7 +335,7 @@ async function loadSampleQuizQuestions() {
 
   const { data, error } = await supabase
     .from('quiz_questions')
-    .upsert(sampleQuestions)
+    .insert(sampleQuestions)
     .select()
 
   if (error) {
