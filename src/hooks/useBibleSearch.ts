@@ -1,130 +1,163 @@
 import { useState, useCallback } from 'react'
 import { SearchResult, Verse, Commentary } from '../types/bible'
 import { SearchType } from '../components/SearchBar'
-
-// Mock data for demonstration
-const mockVerses: Verse[] = [
-  {
-    id: '1',
-    book: 'John',
-    chapter: 3,
-    verse: 16,
-    text: 'For God so loved the world that he gave his one and only Son, that whoever believes in him shall not perish but have eternal life.',
-    translation: 'NIV'
-  },
-  {
-    id: '2',
-    book: 'Matthew',
-    chapter: 6,
-    verse: 14,
-    text: 'For if you forgive other people when they sin against you, your heavenly Father will also forgive you.',
-    translation: 'NIV'
-  },
-  {
-    id: '3',
-    book: 'Luke',
-    chapter: 15,
-    verse: 11,
-    text: 'Jesus continued: "There was a man who had two sons."',
-    translation: 'NIV'
-  },
-  {
-    id: '4',
-    book: '1 Corinthians',
-    chapter: 13,
-    verse: 4,
-    text: 'Love is patient, love is kind. It does not envy, it does not boast, it is not proud.',
-    translation: 'NIV'
-  },
-  {
-    id: '5',
-    book: 'Romans',
-    chapter: 8,
-    verse: 28,
-    text: 'And we know that in all things God works for the good of those who love him, who have been called according to his purpose.',
-    translation: 'NIV'
-  }
-]
-
-const mockCommentary: Commentary[] = [
-  {
-    id: '1',
-    verse_id: '1',
-    author: 'Matthew Henry',
-    text: 'This verse encapsulates the entire gospel message. God\'s love is the source, Christ\'s sacrifice is the means, and eternal life is the result for all who believe.',
-    source: 'Matthew Henry Commentary',
-    created_at: '2024-01-01T00:00:00Z'
-  },
-  {
-    id: '2',
-    verse_id: '2',
-    author: 'John Wesley',
-    text: 'Forgiveness is not optional for the Christian. As we have been forgiven much, we must extend that same grace to others.',
-    source: 'Wesley\'s Notes',
-    created_at: '2024-01-01T00:00:00Z'
-  }
-]
+import { supabase } from '../lib/supabase'
 
 export function useBibleSearch() {
   const [isLoading, setIsLoading] = useState(false)
   const [results, setResults] = useState<SearchResult[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  const searchVerses = async (query: string, type: SearchType) => {
+    let queryBuilder = supabase
+      .from('verses')
+      .select(`
+        id,
+        book_name,
+        chapter,
+        verse,
+        text,
+        translation
+      `)
+
+    switch (type) {
+      case 'verse':
+        // Search by verse reference or text content
+        if (query.match(/\d+:\d+/)) {
+          // Looks like a verse reference (e.g., "John 3:16")
+          const parts = query.split(/\s+/)
+          if (parts.length >= 2) {
+            const bookPart = parts.slice(0, -1).join(' ')
+            const refPart = parts[parts.length - 1]
+            const [chapter, verse] = refPart.split(':').map(Number)
+            
+            queryBuilder = queryBuilder
+              .ilike('book_name', `%${bookPart}%`)
+              .eq('chapter', chapter)
+              .eq('verse', verse)
+          }
+        } else {
+          // Search in verse text
+          queryBuilder = queryBuilder.textSearch('text', query)
+        }
+        break
+      case 'topic':
+        // Search for topic-related keywords in verse text
+        queryBuilder = queryBuilder.textSearch('text', query)
+        break
+      case 'commentary':
+        // This will be handled separately
+        break
+      case 'cross-reference':
+        // Search broadly for now
+        queryBuilder = queryBuilder.textSearch('text', query)
+        break
+    }
+
+    queryBuilder = queryBuilder.limit(20)
+    return queryBuilder
+  }
+
+  const searchCommentary = async (query: string) => {
+    return supabase
+      .from('commentaries')
+      .select(`
+        id,
+        verse_id,
+        author,
+        text,
+        source,
+        created_at,
+        verses!inner (
+          id,
+          book_name,
+          chapter,
+          verse,
+          text,
+          translation
+        )
+      `)
+      .textSearch('text', query)
+      .limit(20)
+  }
+
   const search = useCallback(async (query: string, type: SearchType) => {
     setIsLoading(true)
     setError(null)
 
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      let searchResults: SearchResult[] = []
 
-      // Mock search logic
-      let filteredVerses: Verse[] = []
-      
-      switch (type) {
-        case 'verse':
-          filteredVerses = mockVerses.filter(verse =>
-            verse.text.toLowerCase().includes(query.toLowerCase()) ||
-            `${verse.book} ${verse.chapter}:${verse.verse}`.toLowerCase().includes(query.toLowerCase())
-          )
-          break
-        case 'topic':
-          // Simple topic matching
-          if (query.toLowerCase().includes('love')) {
-            filteredVerses = mockVerses.filter(v => v.id === '1' || v.id === '4')
-          } else if (query.toLowerCase().includes('forgive')) {
-            filteredVerses = mockVerses.filter(v => v.id === '2')
-          } else if (query.toLowerCase().includes('parable')) {
-            filteredVerses = mockVerses.filter(v => v.id === '3')
-          } else {
-            filteredVerses = mockVerses.slice(0, 2)
-          }
-          break
-        case 'commentary':
-          filteredVerses = mockVerses.filter(verse =>
-            mockCommentary.some(comment => 
-              comment.verse_id === verse.id && 
-              comment.text.toLowerCase().includes(query.toLowerCase())
-            )
-          )
-          break
-        case 'cross-reference':
-          filteredVerses = mockVerses.slice(0, 3)
-          break
-        default:
-          filteredVerses = mockVerses
+      if (type === 'commentary') {
+        // Search in commentary and get associated verses
+        const { data: commentaryData, error: commentaryError } = await searchCommentary(query)
+        
+        if (commentaryError) throw commentaryError
+        
+        searchResults = (commentaryData || []).map(item => ({
+          verse: {
+            id: item.verses.id,
+            book: item.verses.book_name,
+            chapter: item.verses.chapter,
+            verse: item.verses.verse,
+            text: item.verses.text,
+            translation: item.verses.translation
+          },
+          commentary: [{
+            id: item.id,
+            verse_id: item.verse_id,
+            author: item.author,
+            text: item.text,
+            source: item.source || '',
+            created_at: item.created_at
+          }],
+          relevance_score: 0.8,
+          context_verses: []
+        }))
+      } else {
+        // Search in verses
+        const { data: versesData, error: versesError } = await searchVerses(query, type)
+        
+        if (versesError) throw versesError
+        
+        // Get commentary for found verses
+        const verseIds = (versesData || []).map(v => v.id)
+        let commentaryData: any[] = []
+        
+        if (verseIds.length > 0) {
+          const { data: comments } = await supabase
+            .from('commentaries')
+            .select('*')
+            .in('verse_id', verseIds)
+          
+          commentaryData = comments || []
+        }
+        
+        searchResults = (versesData || []).map(verse => ({
+          verse: {
+            id: verse.id,
+            book: verse.book_name,
+            chapter: verse.chapter,
+            verse: verse.verse,
+            text: verse.text,
+            translation: verse.translation
+          },
+          commentary: commentaryData.filter(c => c.verse_id === verse.id).map(c => ({
+            id: c.id,
+            verse_id: c.verse_id,
+            author: c.author,
+            text: c.text,
+            source: c.source || '',
+            created_at: c.created_at
+          })),
+          relevance_score: Math.random() * 0.4 + 0.6, // Mock relevance for now
+          context_verses: []
+        }))
       }
-
-      const searchResults: SearchResult[] = filteredVerses.map(verse => ({
-        verse,
-        commentary: mockCommentary.filter(c => c.verse_id === verse.id),
-        relevance_score: Math.random() * 0.4 + 0.6, // Mock relevance score
-        context_verses: []
-      }))
 
       setResults(searchResults)
     } catch (err) {
-      setError('Failed to search. Please try again.')
+      setError('Failed to search. Please check your connection and try again.')
       console.error('Search error:', err)
     } finally {
       setIsLoading(false)

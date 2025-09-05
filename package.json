@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "load-bible": "node scripts/load-bible-data.js",
+    "load-extended-bible": "node scripts/load-extended-bible.js"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
